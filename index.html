@@ -359,7 +359,19 @@ function encodeState(){
 }
 /* tolerant: the prefix may be missing (a long-press on a phone selects only the part after ":"),
    and spaces, line breaks, invisible characters or quotes may sneak in */
-function decodeState(code){
+function decodeState(text){
+  /* the box may hold more than one paste: try the newest piece first, then the rest */
+  var raw=String(text||""),pieces=raw.split(/PCAP1:/i),tries=[];
+  for(var i=pieces.length-1;i>=0;i--)tries.push(pieces[i]);
+  /* every code starts with the same letters (base64 of {"done"), so a code glued to a leftover can still be found */
+  var flat=raw.replace(/\s+/g,""),marks=[],at=flat.indexOf("eyJkb25l");
+  while(at>=0){marks.push(at);at=flat.indexOf("eyJkb25l",at+1);}
+  for(var m=marks.length-1;m>=0;m--)tries.push(flat.slice(marks[m],m+1<marks.length?marks[m+1]:flat.length));
+  tries.push(raw);
+  for(var j=0;j<tries.length;j++){try{return decodeOne(tries[j]);}catch(e){}}
+  throw new Error("invalid");
+}
+function decodeOne(code){
   code=String(code||"").replace(/[\s\u200B-\u200F\u2028-\u202F\u2060\uFEFF"'`\u201C\u201D\u2018\u2019]/g,"");
   var at=code.toUpperCase().lastIndexOf("PCAP1:");
   if(at>=0)code=code.slice(at+6);
@@ -398,6 +410,8 @@ function transfer(){
   b.appendChild(txt("h2","","2. במכשיר השני"));
   b.appendChild(txt("p","muted","מדביקים כאן את הקוד ולוחצים \"מיזוג\". שום דבר לא נמחק: מה שעשית בשני המכשירים מתחבר."));
   var inp=el("textarea","codebox");inp.id="importcode";inp.placeholder="PCAP1:...";inp.setAttribute("aria-label","הדבקת קוד התקדמות");
+  /* tapping a box that already holds text selects it, so a new paste replaces it */
+  inp.onfocus=function(){if(inp.value)try{inp.setSelectionRange(0,inp.value.length);}catch(e){}};
   var ib=txt("button","btn","מיזוג");
   var imsg=el("div");
   ib.onclick=function(){
