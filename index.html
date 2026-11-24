@@ -357,10 +357,16 @@ function encodeState(){
   for(var i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
   return CODE_PREFIX+btoa(bin);
 }
+/* tolerant: the prefix may be missing (a long-press on a phone selects only the part after ":"),
+   and spaces, line breaks, invisible characters or quotes may sneak in */
 function decodeState(code){
-  code=String(code||"").replace(/\s+/g,"");
-  var at=code.indexOf(CODE_PREFIX);if(at<0)throw new Error("prefix");
-  var bin=atob(code.slice(at+CODE_PREFIX.length)),bytes=new Uint8Array(bin.length);
+  code=String(code||"").replace(/[\s\u200B-\u200F\u2028-\u202F\u2060\uFEFF"'`\u201C\u201D\u2018\u2019]/g,"");
+  var at=code.toUpperCase().lastIndexOf("PCAP1:");
+  if(at>=0)code=code.slice(at+6);
+  code=code.replace(/-/g,"+").replace(/_/g,"/").replace(/=+$/,"");
+  if(!/^[A-Za-z0-9+\/]+$/.test(code))throw new Error("chars");
+  while(code.length%4)code+="=";
+  var bin=atob(code),bytes=new Uint8Array(bin.length);
   for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
   var obj=JSON.parse(new TextDecoder().decode(bytes));
   if(!isObj(obj)||!isObj(obj.done))throw new Error("shape");
@@ -378,6 +384,7 @@ function transfer(){
   a.appendChild(txt("p","muted","לוחצים על \"העתקת הקוד\", ושולחים אותו לעצמך (למשל בוואטסאפ או במייל)."));
   var code=encodeState();
   var out=el("textarea","codebox");out.id="exportcode";out.readOnly=true;out.value=code;out.setAttribute("aria-label","קוד ההתקדמות");
+  out.onfocus=out.onclick=function(){try{out.setSelectionRange(0,out.value.length);}catch(e){out.select();}};
   var cb=txt("button","btn","העתקת הקוד");
   var cmsg=txt("p","muted","");
   cb.onclick=function(){
@@ -396,13 +403,19 @@ function transfer(){
   ib.onclick=function(){
     var got;
     try{got=decodeState(inp.value);}
-    catch(e){imsg.innerHTML="";imsg.appendChild(el("div","fb no","<b>הקוד לא תקין.</b>צריך להדביק את כל הקוד, מ-PCAP1: ועד הסוף."));return;}
+    catch(e){imsg.innerHTML="";imsg.appendChild(el("div","fb no","<b>הקוד לא תקין.</b>כנראה חסר בו חלק. העתק אותו שוב עם הכפתור \"העתקת הקוד\", והדבק את כולו."));return;}
     var before=totalDone();
     S=mergeState(S,got);save();
     imsg.innerHTML="";imsg.appendChild(el("div","fb ok","<b>מוזג!</b>שאלות שנוספו: "+Math.max(0,totalDone()-before)+". עכשיו יש "+totalDone()+" מתוך "+TOTAL+"."));
     inp.value="";out.value=code=encodeState();
   };
-  b.appendChild(inp);b.appendChild(ib);b.appendChild(imsg);
+  b.appendChild(inp);
+  if(navigator.clipboard&&typeof navigator.clipboard.readText==="function"){
+    var pb=txt("button","btn alt","הדבקה מהלוח");
+    pb.onclick=function(){try{navigator.clipboard.readText().then(function(t){inp.value=t;},function(){pb.hidden=true;inp.focus();});}catch(e){pb.hidden=true;inp.focus();}};
+    b.appendChild(pb);
+  }
+  b.appendChild(ib);b.appendChild(imsg);
   app.appendChild(b);
 }
 
