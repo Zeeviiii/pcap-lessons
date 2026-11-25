@@ -226,7 +226,13 @@ function dueItems(){return badItems().filter(function(it){return isDue(it.id);})
 function nextDueText(){
   var t=Infinity;badItems().forEach(function(it){var r=S.rev[it.id];if(r&&r.due<t)t=r.due;});
   if(t===Infinity)return "";
-  var days=Math.ceil((t-Date.now())/DAY);return days<=1?"מחר":"בעוד "+days+" ימים";
+  /* say the real time: "today at 22:46", "tomorrow at 21:14", or the date */
+  var due=new Date(t),now=new Date(),hm=("0"+due.getHours()).slice(-2)+":"+("0"+due.getMinutes()).slice(-2);
+  var d0=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+  var dd=Math.round((new Date(due.getFullYear(),due.getMonth(),due.getDate()).getTime()-d0)/DAY);
+  if(dd<=0)return "היום ב-"+hm;
+  if(dd===1)return "מחר ב-"+hm;
+  return "בעוד "+dd+" ימים ("+due.getDate()+"/"+(due.getMonth()+1)+")";
 }
 
 /* ---------- where I stand: first-try accuracy per section ---------- */
