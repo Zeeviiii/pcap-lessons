@@ -128,7 +128,7 @@ var view="home";
 /* coerce any stored or synced copy into a valid state, so bad data can never crash the page */
 function isObj(x){return !!x&&typeof x==="object"&&!Array.isArray(x);}
 function normalize(x){
-  var o={done:{},bad:{},exams:[],t:0,rev:{},last:{}};
+  var o={done:{},bad:{},exams:[],t:0,rev:{},last:{},mast:{},seen:{}};
   if(!isObj(x))return o;
   if(isObj(x.done))for(var a in x.done)if(x.done[a])o.done[a]=true;
   if(isObj(x.bad))for(var b in x.bad)if(x.bad[b])o.bad[b]=true;
@@ -138,6 +138,8 @@ function normalize(x){
   if(o.exams.length>50)o.exams=o.exams.slice(-50);
   o.t=typeof x.t==="number"&&isFinite(x.t)?x.t:0;
   o.reset=typeof x.reset==="number"&&isFinite(x.reset)?x.reset:0;
+  if(isObj(x.mast))for(var f in x.mast){var n=x.mast[f];if(typeof n==="number"&&n>0)o.mast[f]=Math.min(99,Math.floor(n));}
+  if(isObj(x.seen))for(var g in x.seen){var w=x.seen[g];if(typeof w==="number"&&isFinite(w))o.seen[g]=w;}
   return o;
 }
 var S=normalize(null);
@@ -179,6 +181,8 @@ function mergeState(a,b){
   for(var k in (nw.bad||{}))if(nw.bad[k])out.bad[k]=true;
   for(var k2 in (od.bad||{}))if(od.bad[k2]&&!(nw.done||{})[k2])out.bad[k2]=true;
   [od.last||{},nw.last||{}].forEach(function(m){for(var k3 in m)out.last[k3]=m[k3];});
+  out.mast=Object.assign({},od.mast||{},nw.mast||{});
+  out.seen={};[a.seen||{},b.seen||{}].forEach(function(m){for(var k5 in m)out.seen[k5]=Math.max(out.seen[k5]||0,m[k5]);});
   out.rev={};
   for(var k4 in out.bad){var r=(nw.rev||{})[k4]||(od.rev||{})[k4];if(r)out.rev[k4]=r;}
   var seen={};
@@ -295,6 +299,7 @@ function home(){
   sc.appendChild(txt("h2","","איפה אני עומד"));
   var pct=Math.round(st.est*100);
   sc.appendChild(txt("p","muted","הערכת ציון לפי מה שתרגלת: "+pct+"% (הרף 72%). זו הערכה גסה, לפי הניסיון הראשון בכל שאלה."));
+  sc.appendChild(txt("p","muted","שאלות שאתה שולט בהן (5 תשובות נכונות ברצף): "+masteredCount()+" מתוך "+TOTAL+". הן כבר לא חוזרות ב-10 הדקות."));
   var eb2=el("div","bar");eb2.style.margin="6px 0 10px";var ei=el("i");ei.style.width=Math.min(100,pct)+"%";eb2.appendChild(ei);sc.appendChild(eb2);
   st.rows.forEach(function(r){
     var row=el("div","brow");
@@ -444,12 +449,29 @@ var seq=null,pos=0,mode="lesson",lessonIdx=0;
 function openLesson(i,j,skipIntro){mode="lesson";lessonIdx=i;seq=LESSONS[i].items;pos=j||0;
   if(!skipIntro&&LESSONS[i].intro&&LESSONS[i].intro.length)showIntro();else step();}
 function openReview(){mode="review";seq=shuffle(dueItems());pos=0;if(!seq.length){home();return;}step();}
+/* a question answered right on the first try MASTER times in a row is "mastered" and leaves the daily set */
+var MASTER=5, RECENT=12*3600000;
+function isMastered(id){return (S.mast[id]||0)>=MASTER&&!S.bad[id];}
+function masteredCount(){var c=0;for(var k in ITEMS)if(isMastered(k))c++;return c;}
 function openDaily(){
-  var bad=shuffle(dueItems()).slice(0,2), taken={};
-  bad.forEach(function(it){taken[it.id]=1;});
-  var studied=[],rest=[];
-  LESSONS.forEach(function(L){var st=doneCount(L)>0;L.items.forEach(function(it){if(taken[it.id])return;(st?studied:rest).push(it);});});
-  var pick=bad.concat(shuffle(studied)).concat(shuffle(rest)).slice(0,5);
+  var now=Date.now(),pick=[],taken={};
+  function add(list,n){for(var i=0;i<list.length&&n>0&&pick.length<5;i++){var it=list[i];if(!taken[it.id]){taken[it.id]=1;pick.push(it);n--;}}}
+  function notRecent(it){return now-(S.seen[it.id]||0)>=RECENT;}
+  /* 1. mistakes whose review is due today */
+  add(shuffle(dueItems()),2);
+  /* 2. one more question you got wrong in a lesson, even if its review day has not come yet */
+  add(shuffle(badItems().filter(notRecent)),1);
+  /* 3. questions you studied and have not mastered yet, the least practiced first */
+  var studied=[];
+  LESSONS.forEach(function(L){L.items.forEach(function(it){if(S.done[it.id]&&!isMastered(it.id)&&notRecent(it))studied.push(it);});});
+  studied=shuffle(studied).sort(function(a,b){return (S.mast[a.id]||0)-(S.mast[b.id]||0);});
+  add(studied,4-pick.length);
+  /* 4. at least one new question, from the next lessons in order */
+  var fresh=[];LESSONS.forEach(function(L){L.items.forEach(function(it){if(!S.done[it.id])fresh.push(it);});});
+  add(fresh,Math.max(1,5-pick.length));
+  /* 5. still short: anything not seen lately, then anything at all */
+  add(shuffle(Object.keys(ITEMS).map(function(k){return ITEMS[k];}).filter(notRecent)),5);
+  add(shuffle(Object.keys(ITEMS).map(function(k){return ITEMS[k];})),5);
   mode="daily";seq=shuffle(pick);pos=0;step();
 }
 function showIntro(){
@@ -482,7 +504,8 @@ function step(){
   var it=seq[pos],K=kOf(it),right=correctSet(it);
   var top=el("div","topline");
   var back=txt("button","back","חזרה");back.onclick=home;top.appendChild(back);
-  if(mode==="lesson"&&(LESSONS[lessonIdx].intro||[]).length){var ib=txt("button","back alt","הסבר");ib.onclick=showIntro;top.appendChild(ib);}
+  var srcIdx=seq[pos].lesson;
+  if((LESSONS[srcIdx].intro||[]).length){var ib=txt("button","back alt","הסבר");ib.onclick=function(){lessonIdx=srcIdx;showIntro();};top.appendChild(ib);}
   var dots=el("div","dots");
   seq.forEach(function(x,k){dots.appendChild(el("i",(S.done[x.id]&&mode==="lesson"?"d ":"")+(k===pos?"c":"")));});
   top.appendChild(dots);
@@ -519,9 +542,12 @@ function step(){
     solved=true;
     Array.prototype.forEach.call(opts.children,function(x){x.disabled=true;if(right.indexOf(x.textContent)>=0)x.className="opt ok";});
     S.last[it.id]=wrongOnce?0:1;
+    S.seen[it.id]=Date.now();
+    if(wrongOnce)delete S.mast[it.id];else S.mast[it.id]=(S.mast[it.id]||0)+1;
     if(!wrongOnce)markRight(it.id);
     S.done[it.id]=true;save();
     fb.innerHTML="";fb.appendChild(el("div","fb ok","<b>נכון!</b>"+it.e));
+    if(!wrongOnce&&S.mast[it.id]===MASTER&&!S.bad[it.id])fb.appendChild(el("div","fb ok","<b>שלטת בשאלה הזו!</b>ענית עליה נכון 5 פעמים ברצף, אז היא כבר לא תחזור ב-10 הדקות."));
     hb.hidden=true;if(checkBtn)checkBtn.hidden=true;
     var last=pos>=seq.length-1;
     var nx=txt("button","btn",last?(mode==="lesson"?"סיום שיעור":"סיום"):"הבא");
@@ -529,7 +555,7 @@ function step(){
     actions.appendChild(nx);nx.focus();
   }
   function miss(msg){
-    wrongOnce=true;markWrong(it.id);S.last[it.id]=0;save();
+    wrongOnce=true;markWrong(it.id);S.last[it.id]=0;delete S.mast[it.id];save();
     fb.innerHTML="";fb.appendChild(el("div","fb no","<b>עוד לא.</b>"+msg));
   }
   if(checkBtn)checkBtn.onclick=function(){
@@ -667,7 +693,8 @@ function examDone(){
   E.qs.forEach(function(q){
     var ok=sameSet(q.pick,correctSet(q.it));
     by[q.sec]=by[q.sec]||{ok:0,n:0};by[q.sec].n++;
-    S.last[q.it.id]=ok?1:0;
+    S.last[q.it.id]=ok?1:0;S.seen[q.it.id]=Date.now();
+    if(ok)S.mast[q.it.id]=(S.mast[q.it.id]||0)+1;else delete S.mast[q.it.id];
     if(ok){score++;by[q.sec].ok++;markRight(q.it.id);}else{wrong.push(q);markWrong(q.it.id);}
   });
   var n=E.qs.length,pass=score>=Math.ceil(n*0.72);
