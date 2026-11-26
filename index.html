@@ -128,7 +128,7 @@ var view="home";
 /* coerce any stored or synced copy into a valid state, so bad data can never crash the page */
 function isObj(x){return !!x&&typeof x==="object"&&!Array.isArray(x);}
 function normalize(x){
-  var o={done:{},bad:{},exams:[],t:0,rev:{},last:{},mast:{},seen:{},at:{},reset:0};
+  var o={done:{},bad:{},exams:[],t:0,rev:{},last:{},mast:{},seen:{},at:{},pv:{},reset:0};
   if(!isObj(x))return o;
   if(isObj(x.done))for(var a in x.done)if(x.done[a])o.done[a]=true;
   if(isObj(x.bad))for(var b in x.bad)if(x.bad[b])o.bad[b]=true;
@@ -142,11 +142,21 @@ function normalize(x){
   if(isObj(x.seen))for(var g in x.seen){var w=x.seen[g];if(typeof w==="number"&&isFinite(w))o.seen[g]=w;}
   /* at[id]: when this question was last answered, right or wrong; merges go by it, one question at a time */
   if(isObj(x.at))for(var h in x.at){var v=x.at[h];if(typeof v==="number"&&isFinite(v))o.at[h]=v;}
+  if(isObj(x.pv))for(var q in x.pv)if(x.pv[q])o.pv[q]=1;
   return o;
 }
 var S=normalize(null);
 try{var raw=localStorage.getItem(KEY);if(raw)S=normalize(JSON.parse(raw));}catch(e){}
 function touch(id){S.at[id]=Date.now();}
+(function(){
+  /* the daily set added new questions from 26/11 08:12; any lesson whose only progress came from it goes back to 0 */
+  try{if(localStorage.getItem(KEY+"-mig-pv"))return;localStorage.setItem(KEY+"-mig-pv","1");}catch(e){return;}
+  var since=1795673574000,byL={};
+  for(var id in S.done){var it=ITEMS[id];if(!it)continue;(byL[it.lesson]=byL[it.lesson]||[]).push(id);}
+  var changed=false,now=Date.now();
+  for(var l in byL){var ids=byL[l];if(ids.every(function(k){return (S.at[k]||0)>=since;})&&ids.length<=2)ids.forEach(function(k){S.pv[k]=1;S.at[k]=now;changed=true;});}
+  if(changed){S.t=now;try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+})();
 /* remote copy: read, merge, then write; one write at a time; a failure is retried, never lost */
 var remoteRef=null,pushTimer=null,pushBusy=false,pushAgain=false,syncFail=0;
 function readRemote(ref){
@@ -182,7 +192,7 @@ function mergeState(a,b){
   var out=normalize(null);out.t=Math.max(a.t,b.t);out.reset=rst;
   function has(c,id){return !!(c.done[id]||c.bad[id]||c.rev[id]||(id in c.last)||c.mast[id]||c.at[id]);}
   var nw=b.t>a.t?b:a, od=nw===a?b:a, ids={};
-  [a,b].forEach(function(c){["done","bad","rev","last","mast","at"].forEach(function(f){for(var k in c[f])ids[k]=1;});});
+  [a,b].forEach(function(c){["done","bad","rev","last","mast","at","pv"].forEach(function(f){for(var k in c[f])ids[k]=1;});});
   for(var id in ids){
     var ta=a.at[id]||0, tb=b.at[id]||0;
     /* a copy that never saw this question has nothing to say about it; otherwise the later answer wins, then the newer copy */
@@ -194,6 +204,7 @@ function mergeState(a,b){
     if(win.rev[id]&&win.bad[id])out.rev[id]=win.rev[id];
     if(id in win.last)out.last[id]=win.last[id];
     if(win.mast[id])out.mast[id]=win.mast[id];
+    if(win.pv[id])out.pv[id]=1;
     var t=Math.max(ta,tb);if(t)out.at[id]=t;
   }
   [a.seen,b.seen].forEach(function(m){for(var k5 in m)if(!rst||m[k5]>rst)out.seen[k5]=Math.max(out.seen[k5]||0,m[k5]);});
@@ -280,10 +291,12 @@ var app=document.getElementById("app");
 function el(tag,cls,html){var n=document.createElement(tag);if(cls)n.className=cls;if(html!=null)n.innerHTML=html;return n;}
 function txt(tag,cls,t){var n=document.createElement(tag);if(cls)n.className=cls;n.textContent=t;return n;}
 function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
-function doneCount(L){var c=0;L.items.forEach(function(it){if(S.done[it.id])c++;});return c;}
+/* a question answered only as a preview (a new one in "10 minutes today") is not lesson progress */
+function isDone(id){return !!S.done[id]&&!S.pv[id];}
+function doneCount(L){var c=0;L.items.forEach(function(it){if(isDone(it.id))c++;});return c;}
 function badItems(){var r=[];LESSONS.forEach(function(L){L.items.forEach(function(it){if(S.bad[it.id])r.push(it);});});return r;}
-function totalDone(){var c=0;for(var k in S.done)if(S.done[k]&&ITEMS[k])c++;return c;}
-function firstUndone(L){for(var j=0;j<L.items.length;j++)if(!S.done[L.items[j].id])return j;return 0;}
+function totalDone(){var c=0;for(var k in S.done)if(isDone(k)&&ITEMS[k])c++;return c;}
+function firstUndone(L){for(var j=0;j<L.items.length;j++)if(!isDone(L.items[j].id))return j;return 0;}
 function sameSet(a,b){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++)if(b.indexOf(a[i])<0)return false;return true;}
 /* a confirm button needs a real second tap: a double tap (two clicks within 0.6s) only arms it */
 function confirmTap(btn,armedText,act){
@@ -507,11 +520,12 @@ function openDaily(){
   add(shuffle(badItems().filter(notRecent)),1);
   /* 3. questions you studied and have not mastered yet, the least practiced first */
   var studied=[];
-  LESSONS.forEach(function(L){L.items.forEach(function(it){if(S.done[it.id]&&!isMastered(it.id)&&notRecent(it))studied.push(it);});});
+  LESSONS.forEach(function(L){L.items.forEach(function(it){if(isDone(it.id)&&!isMastered(it.id)&&notRecent(it))studied.push(it);});});
   studied=shuffle(studied).sort(function(a,b){return (S.mast[a.id]||0)-(S.mast[b.id]||0);});
   add(studied,4-pick.length);
   /* 4. at least one new question, from the next lessons in order */
-  var fresh=[];LESSONS.forEach(function(L){L.items.forEach(function(it){if(!S.done[it.id])fresh.push(it);});});
+  var fresh=[];LESSONS.forEach(function(L){L.items.forEach(function(it){if(!isDone(it.id)&&!S.pv[it.id])fresh.push(it);});});
+  fresh=fresh.concat(Object.keys(S.pv).map(function(k){return ITEMS[k];}).filter(function(it){return it&&!isDone(it.id);}));
   add(fresh,Math.max(1,5-pick.length));
   /* 5. still short: anything not seen lately, then anything at all */
   add(shuffle(Object.keys(ITEMS).map(function(k){return ITEMS[k];}).filter(notRecent)),5);
@@ -551,7 +565,7 @@ function step(){
   var srcIdx=seq[pos].lesson;
   if((LESSONS[srcIdx].intro||[]).length){var ib=txt("button","back alt","הסבר");ib.onclick=function(){lessonIdx=srcIdx;showIntro();};top.appendChild(ib);}
   var dots=el("div","dots");dots.setAttribute("aria-hidden","true");
-  seq.forEach(function(x,k){dots.appendChild(el("i",(S.done[x.id]&&mode==="lesson"?"d ":"")+(k===pos?"c":"")));});
+  seq.forEach(function(x,k){dots.appendChild(el("i",(isDone(x.id)&&mode==="lesson"?"d ":"")+(k===pos?"c":"")));});
   top.appendChild(dots);
   var lbl=mode==="review"?"טעויות ":mode==="daily"?"היום ":"שאלה ";
   top.appendChild(txt("span","muted",lbl+(pos+1)+"/"+seq.length));
@@ -592,6 +606,9 @@ function step(){
     S.seen[it.id]=Date.now();
     if(wrongOnce)delete S.mast[it.id];else S.mast[it.id]=(S.mast[it.id]||0)+1;
     if(!wrongOnce)markRight(it.id);
+    /* a new question met in "10 minutes today" stays a preview until you study its lesson */
+    var preview=mode==="daily"&&!isDone(it.id)&&doneCount(LESSONS[it.lesson])===0;
+    if(preview)S.pv[it.id]=1;else delete S.pv[it.id];
     S.done[it.id]=true;touch(it.id);delete ATT[it.id];save();
     fb.innerHTML="";fb.appendChild(el("div","fb ok","<b>נכון!</b>"+it.e));
     if(!wrongOnce&&S.mast[it.id]===MASTER&&!S.bad[it.id])fb.appendChild(el("div","fb ok","<b>שלטת בשאלה הזו!</b>ענית עליה נכון 5 פעמים ברצף, אז היא כבר לא תחזור ב-10 הדקות."));
