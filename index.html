@@ -548,6 +548,10 @@ function openDaily(){
 /* ---------- listen to the explanation: the device's own voices (works offline, no files) ---------- */
 var TTS={ok:false,he:null,en:null,heList:[],queue:[],i:0,playing:false,rate:0.9,secEls:[],ui:null};
 try{var r0=parseFloat(localStorage.getItem(KEY+"-rate"));if(r0>0)TTS.rate=r0;}catch(e){}
+/* iOS gives the normal and the enhanced voice the same name; the id (voiceURI) tells them apart */
+function voiceKey(x){return (x&&(x.voiceURI||x.name))||"";}
+function voiceRank(x){var t=(voiceKey(x)+" "+(x.name||""));return /premium/i.test(t)?3:/enhanced|neural|natural|משופר/i.test(t)?2:/compact/i.test(t)?0:1;}
+function voiceLabel(x){var r=voiceRank(x),n=(x.name||"").replace(/\s*\((enhanced|premium|compact)\)/ig,"");return n+(r===3?" (פרימיום)":r===2?" (משופר)":r===0?" (רגיל)":"");}
 function ttsInit(){
   try{
     if(!("speechSynthesis" in window)||typeof SpeechSynthesisUtterance!=="function")return;
@@ -556,9 +560,10 @@ function ttsInit(){
       var v=speechSynthesis.getVoices()||[];
       /* Hebrew voices: the one you chose, else an enhanced or premium one, else male-named, else the first */
       TTS.heList=v.filter(function(x){return /^he|^iw/i.test(x.lang);});
+      /* best quality first: premium, then enhanced, then the rest */
+      TTS.heList.sort(function(a,b){return voiceRank(b)-voiceRank(a);});
       var saved=null;try{saved=localStorage.getItem(KEY+"-voice");}catch(e){}
-      var better=function(x){return /enhanced|premium|neural|משופר|natural/i.test(x.name||"");};
-      TTS.he=TTS.heList.filter(function(x){return x.name===saved;})[0]||TTS.heList.filter(better)[0]||TTS.heList[0]||null;
+      TTS.he=TTS.heList.filter(function(x){return voiceKey(x)===saved;})[0]||TTS.heList[0]||null;
       if(TTS.ui&&TTS.ui.fillVoices)TTS.ui.fillVoices();
       TTS.en=v.filter(function(x){return /^en[-_]US/i.test(x.lang);})[0]||v.filter(function(x){return /^en/i.test(x.lang);})[0]||null;
     };
@@ -646,18 +651,18 @@ function ttsPlayer(L){
   var sel=el("select");sel.id="ttsvoice";vrow.appendChild(sel);box.appendChild(vrow);
   function fillVoices(){
     sel.innerHTML="";
-    TTS.heList.forEach(function(v){var o=document.createElement("option");o.value=v.name;o.textContent=v.name;if(TTS.he&&v.name===TTS.he.name)o.selected=true;sel.appendChild(o);});
+    TTS.heList.forEach(function(v){var o=document.createElement("option");o.value=voiceKey(v);o.textContent=voiceLabel(v);if(TTS.he&&voiceKey(v)===voiceKey(TTS.he))o.selected=true;sel.appendChild(o);});
     vrow.hidden=TTS.heList.length<2;
   }
   sel.onchange=function(){
-    TTS.he=TTS.heList.filter(function(v){return v.name===sel.value;})[0]||TTS.he;
+    TTS.he=TTS.heList.filter(function(v){return voiceKey(v)===sel.value;})[0]||TTS.he;
     try{localStorage.setItem(KEY+"-voice",sel.value);}catch(e){}
     if(TTS.playing)ttsPlayFrom(TTS.i);
   };
   TTS.ui={play:play,fill:fill,time:time,speed:speed,fillVoices:fillVoices};
   fillVoices();
   ttsPaint();
-  box.appendChild(txt("p","muted","לקול ברור יותר: בהגדרות המכשיר, נגישות, תוכן מוקרא, קולות, עברית, מורידים קול \"משופר\" (Enhanced), ובוחרים אותו כאן."));
+  box.appendChild(txt("p","muted","לקול ברור יותר: Settings > Accessibility > Read & Speak > Voices > Hebrew > Carmit, מורידים את Enhanced, ובוחרים כאן \"Carmit (משופר)\"."));
   return box;
 }
 
