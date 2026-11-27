@@ -113,6 +113,8 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .pbar>i{position:absolute;inset-block:0;inset-inline-start:0;background:var(--accent);display:block}
 .pspeed{min-width:52px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-weight:700;direction:ltr;flex:0 0 auto}
 .pplay:focus-visible,.pbar:focus-visible,.pspeed:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.pvoice{display:flex;align-items:center;gap:8px;flex-basis:100%;font-size:.92em}
+.pvoice select{flex:1;min-width:0;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;padding:4px 8px}
 .card.sec.reading{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 [hidden]{display:none!important}
 </style>
@@ -544,14 +546,20 @@ function openDaily(){
   mode="daily";seq=shuffle(pick);pos=0;step();
 }
 /* ---------- listen to the explanation: the device's own voices (works offline, no files) ---------- */
-var TTS={ok:false,he:null,en:null,queue:[],i:0,playing:false,rate:1,secEls:[],ui:null};
+var TTS={ok:false,he:null,en:null,heList:[],queue:[],i:0,playing:false,rate:0.9,secEls:[],ui:null};
+try{var r0=parseFloat(localStorage.getItem(KEY+"-rate"));if(r0>0)TTS.rate=r0;}catch(e){}
 function ttsInit(){
   try{
     if(!("speechSynthesis" in window)||typeof SpeechSynthesisUtterance!=="function")return;
     TTS.ok=true;
     var pick=function(){
       var v=speechSynthesis.getVoices()||[];
-      TTS.he=v.filter(function(x){return /^he|^iw/i.test(x.lang);})[0]||null;
+      /* Hebrew voices: the one you chose, else an enhanced or premium one, else male-named, else the first */
+      TTS.heList=v.filter(function(x){return /^he|^iw/i.test(x.lang);});
+      var saved=null;try{saved=localStorage.getItem(KEY+"-voice");}catch(e){}
+      var better=function(x){return /enhanced|premium|neural|משופר|natural/i.test(x.name||"");};
+      TTS.he=TTS.heList.filter(function(x){return x.name===saved;})[0]||TTS.heList.filter(better)[0]||TTS.heList[0]||null;
+      if(TTS.ui&&TTS.ui.fillVoices)TTS.ui.fillVoices();
       TTS.en=v.filter(function(x){return /^en[-_]US/i.test(x.lang);})[0]||v.filter(function(x){return /^en/i.test(x.lang);})[0]||null;
     };
     pick();
@@ -629,13 +637,27 @@ function ttsPlayer(L){
     var r=bar.getBoundingClientRect(),x=(r.right-ev.clientX)/r.width; /* right to left */
     ttsPlayFrom(Math.floor(Math.max(0,Math.min(0.999,x))*TTS.queue.length));
   };
-  var RATES=[1,1.25,1.5,0.75];
-  speed.onclick=function(){TTS.rate=RATES[(RATES.indexOf(TTS.rate)+1)%RATES.length];if(TTS.playing)ttsPlayFrom(TTS.i);else ttsPaint();};
+  var RATES=[0.9,1,1.25,0.75];
+  speed.onclick=function(){var k=RATES.indexOf(TTS.rate);TTS.rate=RATES[(k+1)%RATES.length];try{localStorage.setItem(KEY+"-rate",String(TTS.rate));}catch(e){}if(TTS.playing)ttsPlayFrom(TTS.i);else ttsPaint();};
   speed.setAttribute("aria-label","מהירות");
   box.appendChild(play);box.appendChild(time);box.appendChild(bar);box.appendChild(speed);
-  TTS.ui={play:play,fill:fill,time:time,speed:speed};
+  /* choose among the Hebrew voices installed on this device */
+  var vrow=el("label","pvoice");vrow.appendChild(txt("span","","קול:"));
+  var sel=el("select");sel.id="ttsvoice";vrow.appendChild(sel);box.appendChild(vrow);
+  function fillVoices(){
+    sel.innerHTML="";
+    TTS.heList.forEach(function(v){var o=document.createElement("option");o.value=v.name;o.textContent=v.name;if(TTS.he&&v.name===TTS.he.name)o.selected=true;sel.appendChild(o);});
+    vrow.hidden=TTS.heList.length<2;
+  }
+  sel.onchange=function(){
+    TTS.he=TTS.heList.filter(function(v){return v.name===sel.value;})[0]||TTS.he;
+    try{localStorage.setItem(KEY+"-voice",sel.value);}catch(e){}
+    if(TTS.playing)ttsPlayFrom(TTS.i);
+  };
+  TTS.ui={play:play,fill:fill,time:time,speed:speed,fillVoices:fillVoices};
+  fillVoices();
   ttsPaint();
-  if(!TTS.he){var note=txt("p","muted","אם ההקראה לא בעברית: בהגדרות המכשיר, נגישות, תוכן מוקרא, קולות, הוסף קול עברי.");box.appendChild(note);}
+  box.appendChild(txt("p","muted","לקול ברור יותר: בהגדרות המכשיר, נגישות, תוכן מוקרא, קולות, עברית, מורידים קול \"משופר\" (Enhanced), ובוחרים אותו כאן."));
   return box;
 }
 
