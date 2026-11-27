@@ -651,18 +651,24 @@ function ttsPlayer(L){
   var sel=el("select");sel.id="ttsvoice";vrow.appendChild(sel);box.appendChild(vrow);
   function fillVoices(){
     sel.innerHTML="";
-    TTS.heList.forEach(function(v){var o=document.createElement("option");o.value=voiceKey(v);o.textContent=voiceLabel(v);if(TTS.he&&voiceKey(v)===voiceKey(TTS.he))o.selected=true;sel.appendChild(o);});
+    /* same label twice (the device hides which is which): number them so each can be tried */
+    var labels=TTS.heList.map(voiceLabel),count={},seen={};
+    labels.forEach(function(l){count[l]=(count[l]||0)+1;});
+    TTS.heList.forEach(function(v,k){var o=document.createElement("option");o.value=voiceKey(v);var l=labels[k];if(count[l]>1){seen[l]=(seen[l]||0)+1;l=l.replace(" (רגיל)","")+" "+seen[l];}o.textContent=l;if(TTS.he&&voiceKey(v)===voiceKey(TTS.he))o.selected=true;sel.appendChild(o);});
     vrow.hidden=TTS.heList.length<2;
   }
   sel.onchange=function(){
     TTS.he=TTS.heList.filter(function(v){return voiceKey(v)===sel.value;})[0]||TTS.he;
     try{localStorage.setItem(KEY+"-voice",sel.value);}catch(e){}
     if(TTS.playing)ttsPlayFrom(TTS.i);
+    else{ /* a short sample, so you hear the voice you picked */
+      try{speechSynthesis.cancel();var u=new SpeechSynthesisUtterance("שלום זאב, ככה נשמע הקול הזה.");u.lang="he-IL";if(TTS.he)u.voice=TTS.he;u.rate=TTS.rate;speechSynthesis.speak(u);}catch(e){}
+    }
   };
   TTS.ui={play:play,fill:fill,time:time,speed:speed,fillVoices:fillVoices};
   fillVoices();
   ttsPaint();
-  box.appendChild(txt("p","muted","לקול ברור יותר: Settings > Accessibility > Read & Speak > Voices > Hebrew > Carmit, מורידים את Enhanced, ובוחרים כאן \"Carmit (משופר)\"."));
+  box.appendChild(txt("p","muted","לקול ברור יותר: Settings > Accessibility > Read & Speak > Voices > Hebrew > Carmit, מורידים את Enhanced, ובוחרים אותו כאן. כל בחירה משמיעה דוגמה קצרה."));
   return box;
 }
 
