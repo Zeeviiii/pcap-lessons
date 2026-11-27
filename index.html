@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PCAP">
 <title>שיעורי PCAP</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -418,9 +422,61 @@ function home(){
       try{localStorage.setItem(KEY+"-before-reset",JSON.stringify(S));}catch(e){}
       S=normalize(null);S.reset=Date.now();save();home();});
   };
+  app.appendChild(offlineCard());
   foot.appendChild(rs);app.appendChild(foot);
   if(STANDALONE)app.appendChild(txt("p","muted center","גרסת גיבוי באינטרנט. ההתקדמות כאן נשמרת רק בדפדפן הזה, בלי סנכרון."));
   else if(syncFail)app.appendChild(txt("p","muted center","הסנכרון בין המכשירים לא הצליח כרגע. ההתקדמות שמורה במכשיר הזה, והאתר ינסה שוב לבד."));
+}
+
+/* ---------- offline: the backup site keeps the page, PDFs and recordings on the device ---------- */
+var OFFLINE_CACHE="pcap-offline-v1";
+var GH_URL="https://zeeviiii.github.io/pcap-lessons/";
+if(STANDALONE&&"serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js").catch(function(){});}catch(e){}}
+function offlineFiles(){
+  var f=["./","index.html","manifest.json","icon-192.png","icon-512.png"];
+  LESSONS.forEach(function(L){if(PDFS[L.id])f.push(PDFS[L.id]);if(AUDIO[L.id])f.push(AUDIO[L.id]);});
+  return f;
+}
+function offlineCard(){
+  var c=el("div","card");
+  c.appendChild(txt("h3","","בלי אינטרנט (טיסה)"));
+  if(!STANDALONE){
+    c.appendChild(txt("p","muted","באפליקציה האתר צריך אינטרנט. לטיסה: פותחים ב-Safari את אתר הגיבוי, לוחצים שם \"הורדה לשימוש בלי אינטרנט\", ואז Share > Add to Home Screen."));
+    var u=txt("p","codebox",GH_URL);u.style.userSelect="text";u.style.direction="ltr";c.appendChild(u);
+    var cp=txt("button","btn alt","העתקת הכתובת");
+    cp.onclick=function(){try{navigator.clipboard.writeText(GH_URL).then(function(){cp.textContent="הועתק";},function(){cp.textContent="סמן את הכתובת והעתק";});}catch(e){cp.textContent="סמן את הכתובת והעתק";}};
+    c.appendChild(cp);
+    c.appendChild(txt("p","muted","את ההתקדמות מעבירים בין האתרים עם הכפתור \"העתקה או הדבקה של התקדמות\"."));
+    return c;
+  }
+  var ok=false;try{ok=localStorage.getItem(KEY+"-offline")===OFFLINE_CACHE;}catch(e){}
+  var st=txt("p","muted",ok?"מוכן: השיעורים, ה-PDF וההקלטות שמורים במכשיר. אפשר ללמוד גם בטיסה.":"מורידים פעם אחת (כ-30MB, עדיף בוויי-פיי), ואחר כך הכל עובד גם בלי אינטרנט.");
+  c.appendChild(st);
+  if(!("caches" in window)){st.textContent="הדפדפן הזה לא תומך בשמירה לשימוש בלי אינטרנט. נסה ב-Safari.";return c;}
+  var b=txt("button","btn alt",ok?"הורדה מחדש":"הורדה לשימוש בלי אינטרנט");
+  b.onclick=function(){
+    if(b.disabled)return;b.disabled=true;
+    var files=offlineFiles(),done=0,bad=0;
+    caches.open(OFFLINE_CACHE).then(function(cache){
+      var next=0;
+      function one(){
+        if(next>=files.length)return Promise.resolve();
+        var f=files[next++];
+        return fetch(f,{cache:"reload"}).then(function(r){if(!r.ok)throw new Error("http");return cache.put(f,r);})
+          .catch(function(){bad++;})
+          .then(function(){done++;st.textContent="מוריד... "+done+" מתוך "+files.length;return one();});
+      }
+      return Promise.all([one(),one(),one()]);
+    }).then(function(){
+      b.disabled=false;
+      if(bad){st.textContent=bad+" קבצים לא ירדו. בדוק חיבור ולחץ שוב.";return;}
+      try{localStorage.setItem(KEY+"-offline",OFFLINE_CACHE);}catch(e){}
+      st.textContent="מוכן: השיעורים, ה-PDF וההקלטות שמורים במכשיר. אפשר ללמוד גם בטיסה.";b.textContent="הורדה מחדש";
+    },function(){b.disabled=false;st.textContent="ההורדה לא הצליחה. נסה שוב.";});
+  };
+  c.appendChild(b);
+  c.appendChild(txt("p","muted","טיפ: Share > Add to Home Screen, ואז פותחים מהאייקון במסך הבית."));
+  return c;
 }
 
 /* ---------- progress transfer: a text code, merged on the other side ---------- */
