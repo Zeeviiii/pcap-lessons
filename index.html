@@ -104,6 +104,16 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .brow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)}
 .codebox{display:block;width:100%;min-height:90px;margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--opt);color:var(--ink);font-family:var(--mono);font-size:.8em;direction:ltr;text-align:left;word-break:break-all;resize:vertical}
 .codebox:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.playerwrap{position:-webkit-sticky;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:6px}
+.player{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;padding:10px 12px;border:2px solid var(--accent);border-radius:14px;background:var(--opt)}
+.player .muted{flex-basis:100%;margin:0}
+.pplay{width:48px;height:48px;border-radius:12px;border:0;background:var(--accent-soft);color:var(--ink);font-size:1.2em;flex:0 0 auto}
+.ptime{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;font-weight:700;font-size:.95em;flex:0 0 auto}
+.pbar{flex:1 1 90px;min-width:60px;height:10px;border-radius:6px;border:0;padding:0;background:var(--line);overflow:hidden;position:relative;cursor:pointer}
+.pbar>i{position:absolute;inset-block:0;inset-inline-start:0;background:var(--accent);display:block}
+.pspeed{min-width:52px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-weight:700;direction:ltr;flex:0 0 auto}
+.pplay:focus-visible,.pbar:focus-visible,.pspeed:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.card.sec.reading{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -315,6 +325,7 @@ function pickChip(it){return kOf(it)>1?txt("span","chip","בחר "+kOf(it)):null
 
 /* ---------- home ---------- */
 function home(){
+  ttsStop();TTS.ui=null;
   view="home";clearInterval(examTimer);
   app.innerHTML="";window.scrollTo(0,0);
   var head=el("div","card");
@@ -532,7 +543,104 @@ function openDaily(){
   add(shuffle(Object.keys(ITEMS).map(function(k){return ITEMS[k];})),5);
   mode="daily";seq=shuffle(pick);pos=0;step();
 }
+/* ---------- listen to the explanation: the device's own voices (works offline, no files) ---------- */
+var TTS={ok:false,he:null,en:null,queue:[],i:0,playing:false,rate:1,secEls:[],ui:null};
+function ttsInit(){
+  try{
+    if(!("speechSynthesis" in window)||typeof SpeechSynthesisUtterance!=="function")return;
+    TTS.ok=true;
+    var pick=function(){
+      var v=speechSynthesis.getVoices()||[];
+      TTS.he=v.filter(function(x){return /^he|^iw/i.test(x.lang);})[0]||null;
+      TTS.en=v.filter(function(x){return /^en[-_]US/i.test(x.lang);})[0]||v.filter(function(x){return /^en/i.test(x.lang);})[0]||null;
+    };
+    pick();
+    if(typeof speechSynthesis.addEventListener==="function")speechSynthesis.addEventListener("voiceschanged",pick);
+    else speechSynthesis.onvoiceschanged=pick;
+  }catch(e){TTS.ok=false;}
+}
+ttsInit();
+function plainText(html){
+  var d=document.createElement("div");
+  d.innerHTML=String(html||"").replace(/<br\s*\/?>/gi,". ").replace(/<\/(li|p|div|h\d)>/gi,". ");
+  return (d.textContent||"").replace(/\s+/g," ").trim();
+}
+/* the script: each section's title and text in Hebrew, then its printed output; code is shown on screen, not read */
+function lessonScript(L){
+  var q=[];
+  L.intro.forEach(function(sc,k){
+    q.push({sec:k,lang:"he",text:"חלק "+(k+1)+". "+plainText(sc.h)+"."});
+    plainText(sc.t).replace(/([.!?:])\s+/g,"$1\u0001").split("\u0001").forEach(function(part){if(part.replace(/[\s.]/g,""))q.push({sec:k,lang:"he",text:part});});
+    if(sc.code&&sc.out)q.push({sec:k,lang:"he",text:"בדוגמת הקוד שעל המסך, הפלט הוא:"});
+    if(sc.code&&sc.out)sc.out.split("\n").forEach(function(line){if(line.trim())q.push({sec:k,lang:"en",text:line});});
+  });
+  return q;
+}
+function ttsStop(){
+  TTS.playing=false;
+  try{if(TTS.ok)speechSynthesis.cancel();}catch(e){}
+  ttsPaint();
+}
+function ttsSpeakNext(){
+  if(!TTS.playing)return;
+  if(TTS.i>=TTS.queue.length){TTS.playing=false;TTS.i=0;ttsPaint(true);return;}
+  var seg=TTS.queue[TTS.i],u=new SpeechSynthesisUtterance(seg.text);
+  var voice=seg.lang==="en"?TTS.en:TTS.he;
+  u.lang=seg.lang==="en"?"en-US":"he-IL";if(voice)u.voice=voice;u.rate=TTS.rate;
+  var my=TTS.i;
+  u.onend=function(){if(!TTS.playing||TTS.i!==my)return;TTS.i++;ttsSpeakNext();};
+  u.onerror=function(ev){if(!TTS.playing||TTS.i!==my)return;if(ev&&(ev.error==="interrupted"||ev.error==="canceled"))return;TTS.i++;ttsSpeakNext();};
+  ttsPaint();
+  try{speechSynthesis.speak(u);}catch(e){TTS.playing=false;ttsPaint();}
+}
+function ttsPlayFrom(i){
+  try{speechSynthesis.cancel();}catch(e){}
+  TTS.i=Math.max(0,Math.min(i,TTS.queue.length-1));TTS.playing=true;
+  setTimeout(ttsSpeakNext,60);
+}
+function fmtTime(sec){sec=Math.max(0,Math.round(sec));return Math.floor(sec/60)+":"+("0"+(sec%60)).slice(-2);}
+function ttsSecs(from,to){var c=0;for(var i=from;i<to;i++)c+=TTS.queue[i].text.length;return c/14/TTS.rate;}
+function ttsPaint(finished){
+  var u=TTS.ui;if(!u)return;
+  u.play.textContent=TTS.playing?"⏸":"▶";
+  u.play.setAttribute("aria-label",TTS.playing?"השהיה":"השמעה");
+  var n=TTS.queue.length||1,i=Math.min(TTS.i,n);
+  u.fill.style.width=(finished?100:i/n*100)+"%";
+  u.time.textContent=fmtTime(ttsSecs(0,finished?n:i))+" / "+fmtTime(ttsSecs(0,TTS.queue.length));
+  u.speed.textContent=TTS.rate+"x";
+  var cur=TTS.queue[i]&&TTS.playing?TTS.queue[i].sec:-1;
+  TTS.secEls.forEach(function(e,k){
+    var on=k===cur;
+    if(on&&e.className.indexOf("reading")<0){e.className+=" reading";try{e.scrollIntoView({behavior:"smooth",block:"center"});}catch(x){}}
+    if(!on)e.className=e.className.replace(/\s*reading/g,"");
+  });
+}
+function ttsPlayer(L){
+  var box=el("div","player");
+  if(!TTS.ok){box.appendChild(txt("span","muted","השמעה בקול לא זמינה בדפדפן הזה."));return box;}
+  TTS.queue=lessonScript(L);TTS.i=0;TTS.playing=false;
+  var play=txt("button","pplay","▶"),bar=el("button","pbar"),fill=el("i"),time=txt("span","ptime",""),speed=txt("button","pspeed","1x");
+  bar.appendChild(fill);bar.setAttribute("aria-label","מיקום בהשמעה");
+  play.onclick=function(){
+    if(TTS.playing){TTS.playing=false;try{speechSynthesis.cancel();}catch(e){}ttsPaint();}
+    else ttsPlayFrom(TTS.i>=TTS.queue.length?0:TTS.i);
+  };
+  bar.onclick=function(ev){
+    var r=bar.getBoundingClientRect(),x=(r.right-ev.clientX)/r.width; /* right to left */
+    ttsPlayFrom(Math.floor(Math.max(0,Math.min(0.999,x))*TTS.queue.length));
+  };
+  var RATES=[1,1.25,1.5,0.75];
+  speed.onclick=function(){TTS.rate=RATES[(RATES.indexOf(TTS.rate)+1)%RATES.length];if(TTS.playing)ttsPlayFrom(TTS.i);else ttsPaint();};
+  speed.setAttribute("aria-label","מהירות");
+  box.appendChild(play);box.appendChild(time);box.appendChild(bar);box.appendChild(speed);
+  TTS.ui={play:play,fill:fill,time:time,speed:speed};
+  ttsPaint();
+  if(!TTS.he){var note=txt("p","muted","אם ההקראה לא בעברית: בהגדרות המכשיר, נגישות, תוכן מוקרא, קולות, הוסף קול עברי.");box.appendChild(note);}
+  return box;
+}
+
 function showIntro(){
+  ttsStop();
   view="intro";app.innerHTML="";window.scrollTo(0,0);
   var L=LESSONS[lessonIdx];
   var top=el("div","topline");
@@ -544,8 +652,12 @@ function showIntro(){
   head.appendChild(txt("h1","","שיעור "+L.n+": "+L.t));
   head.appendChild(txt("p","muted","קודם קוראים את ההסבר, ואחריו "+L.items.length+" שאלות קצרות. הנושא שווה "+L.w+" מהמבחן."));
   app.appendChild(head);
+  /* the player stays on screen while the page scrolls to the part being read */
+  var pw=el("div","playerwrap");pw.appendChild(txt("div","muted","אפשר גם להקשיב להסבר:"));pw.appendChild(ttsPlayer(L));
+  app.appendChild(pw);
+  TTS.secEls=[];
   L.intro.forEach(function(sct,k){
-    var c=el("div","card sec");
+    var c=el("div","card sec");TTS.secEls.push(c);
     c.appendChild(txt("h2","",(k+1)+". "+sct.h));
     c.appendChild(el("div","t",sct.t));
     if(sct.code){var pre=el("pre","code");pre.textContent=sct.code;c.appendChild(pre);}
@@ -558,6 +670,7 @@ function showIntro(){
 }
 
 function step(){
+  ttsStop();TTS.ui=null;
   view="step";app.innerHTML="";window.scrollTo(0,0);
   var it=seq[pos],K=kOf(it),right=correctSet(it);
   var top=el("div","topline");
